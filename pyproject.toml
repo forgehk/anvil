@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anvil-mcp-gateway"
+version = "0.1.0"
+description = "Policy-enforcing security gateway for MCP: allow/deny rules, human approval, secret redaction, prompt-injection scanning, tool pinning, audit log."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "@forgehk", email = "info@darkforgeai.com" }]
+keywords = ["security", "mcp", "model-context-protocol", "prompt-injection", "gateway", "policy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+anvil = "anvil.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["anvil*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

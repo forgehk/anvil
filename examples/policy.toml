@@ -1,0 +1,56 @@
+# Example policy for a filesystem-style MCP server.
+# Rules are checked top to bottom; the first one whose glob matches the tool name wins.
+
+default = "deny"          # anything not named below is refused
+hide_denied = true        # and is removed from tools/list, so the model never sees it
+
+[redaction]
+results = true            # scrub secrets from what the server returns
+audit = true              # scrub secrets from arguments before they are logged
+
+[injection]
+flag_at = 25              # pass the result on with a warning in front
+block_at = 60             # withhold the result
+
+[pinning]
+enabled = true
+on_new_tool = "pin"       # "block" refuses any tool that is not already in the lock file
+
+[approval]
+timeout_seconds = 60      # no answer in time counts as no
+
+# Reading is allowed, except for the places credentials live.
+[[rule]]
+tool = "read_*"
+action = "allow"
+
+  [[rule.arg]]
+  name = "path"
+  deny_pattern = '(^|[\\/])(\.ssh|\.aws|\.gnupg)([\\/]|$)|(^|[\\/])\.env(\.|$)|id_(rsa|ed25519)$'
+  max_length = 4096
+
+[[rule]]
+tool = "list_*"
+action = "allow"
+
+[[rule]]
+tool = "search_*"
+action = "allow"
+
+# Anything that changes the disk needs a person to say yes.
+[[rule]]
+tool = "write_*"
+action = "approve"
+
+[[rule]]
+tool = "edit_*"
+action = "approve"
+
+[[rule]]
+tool = "move_*"
+action = "approve"
+
+[[rule]]
+tool = "delete_*"
+action = "deny"
+reason = "Deleting through the gateway is turned off."
