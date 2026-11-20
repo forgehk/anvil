@@ -84,6 +84,13 @@ def run(
     def pump_server() -> None:
         for raw in server.stdout:
             for message in _decode(raw, "server"):
+                if isinstance(message, dict) and "method" in message:
+                    outcome = gateway.from_server_request(message)
+                    if outcome.forward is not None:
+                        to_client(outcome.forward)
+                    if outcome.reply is not None:
+                        to_server(outcome.reply)
+                    continue
                 processed = gateway.from_server(message)
                 if processed is not None:
                     to_client(processed)
