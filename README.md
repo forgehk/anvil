@@ -89,6 +89,8 @@ The client still thinks it is talking to the server. A fuller policy is in [`exa
 
 **Results coming back.** Results of `tools/call`, `resources/read` and `prompts/get` are redacted, then scanned. Everything else passes through untouched.
 
+**Sampling requests from the server.** A `sampling/createMessage` request asks the client's model for a completion, so it is a direct line from the server to the model. Its system prompt and the text of every message are scanned. Over the block threshold, anvil answers the server with an error and the client never sees the request; over the flag threshold, the request goes through with a warning put in front of its system prompt.
+
 ## Policy reference
 
 ```toml
@@ -185,7 +187,7 @@ One JSON record per line. Each record carries the hash of the one before it:
 {"arguments": {"path": "app/.env"}, "event": "call.denied", "hash": "9b4e…", "prev": "41a7…", "reason": "argument 'path' matches a denied pattern", "rule": "read_*", "seq": 12, "tool": "read_text_file", "ts": 1795149667.21}
 ```
 
-Events: `gateway.started`, `call.allowed`, `call.denied`, `call.approved`, `call.rejected`, `call.malformed`, `tool.pinned`, `tool.changed`, `tool.unpinned`, `tool.poisoned`, `tool.flagged`, `tool.malformed`, `result.redacted`, `result.flagged`, `result.blocked`.
+Events: `gateway.started`, `call.allowed`, `call.denied`, `call.approved`, `call.rejected`, `call.malformed`, `tool.pinned`, `tool.changed`, `tool.unpinned`, `tool.poisoned`, `tool.flagged`, `tool.malformed`, `result.redacted`, `result.flagged`, `result.blocked`, `sampling.flagged`, `sampling.blocked`.
 
 ```console
 $ anvil audit verify anvil-audit.jsonl
@@ -204,7 +206,7 @@ Read these before you rely on it.
 - **Redaction matches known shapes.** A secret with no recognizable format and no telling key name gets through.
 - **Approval needs a terminal.** A client that launches servers with no controlling terminal, as desktop apps do, cannot be asked. Approve rules deny in that case. `--approve deny` makes that explicit.
 - **The audit chain detects edits, it does not prevent them.** Someone who can rewrite the whole file can rebuild the chain. Ship the log elsewhere if that matters.
-- **Server-initiated requests pass through.** Sampling and elicitation requests from the server are not inspected.
+- **Elicitation requests pass through.** Sampling requests from the server are scanned; elicitation requests, which go to the person rather than the model, are not inspected.
 - **JSON-RPC batches are split** and handled one message at a time. MCP dropped batching in its 2025-06-18 revision.
 
 ## Tests
@@ -214,7 +216,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-206 tests. The end-to-end tests start the real proxy in front of a deliberately hostile server (`tests/fake_server.py`) that poisons a tool description, leaks a credential and returns an injected page, then check what reaches the client and what lands in the audit log. CI runs the suite on Python 3.11, 3.12 and 3.13 on Linux, and on 3.13 on Windows.
+215 tests. The end-to-end tests start the real proxy in front of a deliberately hostile server (`tests/fake_server.py`) that poisons a tool description, leaks a credential and returns an injected page, then check what reaches the client and what lands in the audit log. CI runs the suite on Python 3.11, 3.12 and 3.13 on Linux, and on 3.13 on Windows.
 
 ## Layout
 
