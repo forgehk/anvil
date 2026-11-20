@@ -19,6 +19,43 @@ anvil is a stdio proxy that puts six checks on that path. It needs nothing outsi
 | Tool pinning | Every tool definition is fingerprinted the first time it is seen. If the definition changes later, the tool is quarantined. |
 | Audit log | Every decision is appended to a hash-chained JSON lines file that `anvil audit verify` can check for tampering. |
 
+**Status:** working and tested, with 206 tests on Linux and Windows. It has not been deployed in front of a production client. It narrows what a tool server can make a model do; it does not make an untrusted server safe. Read [Limits](#limits) first.
+
+## Who is trusted
+
+```text
+ model ◀──▶ MCP client ◀── stdio ──▶ anvil ◀── stdio ──▶ MCP server ──▶ files, APIs, shells
+                                       ▲
+                                       │
+                                    operator
+```
+
+| Party | Trusted to | Not trusted to |
+|---|---|---|
+| Operator | Write the policy and answer approval prompts | |
+| MCP client and model | Speak the protocol | Tell instructions from data in what a tool returns |
+| MCP server | Nothing | Describe its tools honestly, return clean results, or stay the same between sessions |
+
+anvil sits on the one channel between client and server. Every call the model makes passes a check before the server runs it, and everything the server says passes one before the model reads it. What it cannot see it cannot stop: damage a server does inside a call the policy allows, or a client that reaches a server without going through anvil.
+
+## Three decisions, no server needed
+
+`examples/policy.toml` allows reads, asks before writes and refuses deletes. `anvil check` evaluates one call against a policy without starting anything, so this needs no server and no credentials:
+
+```console
+$ anvil check examples/policy.toml --tool read_text_file --args '{"path": "/home/me/notes/todo.md"}'
+allow: rule 'read_*'
+
+$ anvil check examples/policy.toml --tool write_file --args '{"path": "/home/me/notes/todo.md", "content": "x"}'
+approve: rule 'write_*'
+
+$ anvil check examples/policy.toml --tool read_text_file --args '{"path": "/home/me/.ssh/id_rsa"}'
+deny: argument 'path' matches a denied pattern
+
+$ anvil check examples/policy.toml --tool delete_branch --args '{"name": "main"}'
+deny: Deleting through the gateway is turned off.
+```
+
 ## Install
 
 ```bash
