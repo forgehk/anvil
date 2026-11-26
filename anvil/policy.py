@@ -104,6 +104,8 @@ class Policy:
     on_new_tool: str = "pin"
     # Human approval.
     approval_timeout: float = 60.0
+    # Elicitation requests that ask the person for a credential are refused.
+    elicitation_block_credentials: bool = True
 
     def match(self, tool_name: str) -> Rule | None:
         for rule in self.rules:
@@ -146,7 +148,7 @@ def load(path: str | Path) -> Policy:
 
 def parse(data: dict[str, Any]) -> Policy:
     """Build a policy from already-decoded TOML."""
-    _only_keys(data, {"default", "hide_denied", "rule", "redaction", "injection", "pinning", "approval"}, "policy")
+    _only_keys(data, {"default", "hide_denied", "rule", "redaction", "injection", "pinning", "approval", "elicitation"}, "policy")
     policy = Policy()
     policy.default = _action(data.get("default", "deny"), "default")
     policy.hide_denied = _bool(data.get("hide_denied", True), "hide_denied")
@@ -173,6 +175,11 @@ def parse(data: dict[str, Any]) -> Policy:
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
         raise PolicyError("approval.timeout_seconds must be a positive number")
     policy.approval_timeout = float(timeout)
+
+    elicitation = _table(data, "elicitation", {"block_credentials"})
+    policy.elicitation_block_credentials = _bool(
+        elicitation.get("block_credentials", True), "elicitation.block_credentials"
+    )
 
     rules = data.get("rule", [])
     if not isinstance(rules, list):
