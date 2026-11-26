@@ -22,12 +22,16 @@ Server to client:
     completion, are scanned the same way: the system prompt and the text of every
     message. One over the block threshold is refused back to the server and never
     reaches the client; one over the flag threshold gets a warning in its system prompt.
+    ``elicitation/create`` requests in form mode, where the server asks the person to
+    fill in fields, are refused back to the server when a field asks for a credential.
+    MCP forbids servers from using form elicitation for sensitive information.
 
 Everything else passes through untouched.
 """
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -42,6 +46,16 @@ SANITIZED = ("tools/call", "resources/read", "prompts/get")
 TRACKED = ("tools/list",) + SANITIZED
 
 SAMPLING = "sampling/createMessage"
+ELICITATION = "elicitation/create"
+
+# Matched against each requested field's name and title, after splitting camelCase,
+# snake_case and kebab-case into words.
+CREDENTIAL_FIELD = re.compile(
+    r"pass(word|wd|phrase|code)|\bpin\b|\bsecrets?\b|\btoken\b|\bapi ?key\b|\baccess ?key\b"
+    r"|private ?key|credential|\botp\b|one time (code|password)|\b(2fa|mfa)\b|verification code"
+    r"|credit ?card|card number|\bcvc\b|\bcvv\b|\bssn\b|social security|seed phrase|mnemonic"
+    r"|recovery (phrase|code)"
+)
 
 SAMPLING_NOTICE = (
     "[anvil] This sampling request from an MCP server contains text that reads like "
@@ -230,7 +244,11 @@ class Gateway:
 
         ``forward`` goes on to the client; ``reply`` goes back to the server instead.
         """
-        if not isinstance(message, dict) or message.get("method") != SAMPLING:
+        if not isinstance(message, dict):
+            return Outcome(forward=message)
+        if message.get("method") == ELICITATION:
+            return self._elicitation(message)
+        if message.get("method") != SAMPLING:
             return Outcome(forward=message)
         if not self.policy.injection_enabled:
             return Outcome(forward=message)
@@ -248,6 +266,20 @@ class Gateway:
             notice = SAMPLING_NOTICE if not isinstance(system, str) or not system else SAMPLING_NOTICE + "\n\n" + system
             return Outcome(forward={**message, "params": {**params, "systemPrompt": notice}})
         return Outcome(forward=message)
+
+    def _elicitation(self, message: dict[str, Any]) -> Outcome:
+        params = message.get("params")
+        if not self.policy.elicitation_block_credentials or not isinstance(params, dict):
+            return Outcome(forward=message)
+        # URL mode exists so that sensitive input happens outside the client; leave it alone.
+        if params.get("mode", "form") != "form":
+            return Outcome(forward=message)
+        fields = _credential_fields(params.get("requestedSchema"))
+        if not fields:
+            return Outcome(forward=message)
+        self.audit.append("elicitation.blocked", fields=fields)
+        reason = "elicitation request refused, it asks for credentials (" + ", ".join(fields) + ")"
+        return self._answer(message, _error(message.get("id"), -32001, "anvil: " + reason))
 
     # ------------------------------------------------------------------ helpers
 
@@ -278,6 +310,26 @@ def _sampling_text(params: dict[str, Any]) -> list[str]:
             if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
                 texts.append(block["text"])
     return texts
+
+
+def _credential_fields(schema: Any) -> list[str]:
+    """Names of the requested fields that ask for a password, token, key or similar."""
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict):
+        return []
+    found = []
+    for name, spec in properties.items():
+        labels = [str(name)]
+        if isinstance(spec, dict) and isinstance(spec.get("title"), str):
+            labels.append(spec["title"])
+        if any(CREDENTIAL_FIELD.search(_words(label)) for label in labels):
+            found.append(str(name))
+    return found
+
+
+def _words(label: str) -> str:
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", label)
+    return re.sub(r"[\s_.\-]+", " ", spaced).lower()
 
 
 def _key(request_id: Any) -> tuple[str, Any]:
