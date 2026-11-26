@@ -1,3 +1,5 @@
+import pytest
+
 from anvil import policy
 from anvil.approval import CallbackApprover
 from anvil.audit import AuditLog
@@ -485,3 +487,75 @@ def test_other_server_requests_pass_through_the_request_path():
     gw = gateway()
     message = {"jsonrpc": "2.0", "id": 7, "method": "roots/list"}
     assert gw.from_server_request(message).forward == message
+
+
+# ---------------------------------------------------------------- elicitation, server to client
+
+
+def elicitation(properties, mode=None, request_id="e1"):
+    params = {"message": "Please fill this in.", "requestedSchema": {"type": "object", "properties": properties}}
+    if mode is not None:
+        params["mode"] = mode
+    return {"jsonrpc": "2.0", "id": request_id, "method": "elicitation/create", "params": params}
+
+
+def test_an_elicitation_for_ordinary_fields_is_forwarded_unchanged():
+    gw = gateway()
+    message = elicitation({"name": {"type": "string", "title": "Display name"}, "maxTokens": {"type": "integer"}})
+    outcome = gw.from_server_request(message)
+    assert outcome.forward == message and outcome.reply is None
+    assert events(gw) == []
+
+
+def test_an_elicitation_that_asks_for_a_password_is_refused_to_the_server():
+    gw = gateway()
+    outcome = gw.from_server_request(elicitation({"user": {"type": "string"}, "password": {"type": "string"}}))
+    assert outcome.forward is None
+    assert outcome.reply["id"] == "e1" and outcome.reply["error"]["code"] == -32001
+    assert "credentials (password)" in outcome.reply["error"]["message"]
+    assert events(gw) == ["elicitation.blocked"]
+
+
+def test_credential_field_names_are_matched_across_naming_styles():
+    gw = gateway()
+    names = ["apiKey", "GITHUB_TOKEN", "ssh-passphrase", "pin_code", "cardNumber", "mfa.code", "client_secret"]
+    for name in names:
+        assert gw.from_server_request(elicitation({name: {"type": "string"}})).reply is not None, name
+
+
+def test_a_credential_asked_for_in_the_field_title_is_refused():
+    gw = gateway()
+    message = elicitation({"value": {"type": "string", "title": "Your AWS secret access key"}})
+    assert gw.from_server_request(message).reply is not None
+
+
+def test_words_that_only_contain_a_credential_word_are_not_matched():
+    gw = gateway()
+    message = elicitation({"spinner": {"type": "boolean"}, "tokens": {"type": "integer"}, "passenger": {"type": "string"}})
+    assert gw.from_server_request(message).forward == message
+
+
+def test_url_mode_elicitation_passes_through():
+    gw = gateway()
+    message = elicitation({}, mode="url")
+    message["params"]["url"] = "https://auth.example.com/connect"
+    assert gw.from_server_request(message).forward == message
+
+
+def test_elicitation_checks_can_be_turned_off():
+    gw = gateway({"elicitation": {"block_credentials": False}})
+    message = elicitation({"password": {"type": "string"}})
+    assert gw.from_server_request(message).forward == message
+
+
+def test_a_malformed_elicitation_passes_through_for_the_client_to_reject():
+    gw = gateway()
+    message = {"jsonrpc": "2.0", "id": 3, "method": "elicitation/create", "params": {"requestedSchema": "password"}}
+    assert gw.from_server_request(message).forward == message
+
+
+def test_the_elicitation_table_is_validated():
+    with pytest.raises(policy.PolicyError, match="elicitation.block_credentials must be true or false"):
+        policy.parse({"elicitation": {"block_credentials": "yes"}})
+    with pytest.raises(policy.PolicyError, match="unknown key"):
+        policy.parse({"elicitation": {"block": True}})
