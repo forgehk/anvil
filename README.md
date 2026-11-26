@@ -91,6 +91,8 @@ The client still thinks it is talking to the server. A fuller policy is in [`exa
 
 **Sampling requests from the server.** A `sampling/createMessage` request asks the client's model for a completion, so it is a direct line from the server to the model. Its system prompt and the text of every message are scanned. Over the block threshold, anvil answers the server with an error and the client never sees the request; over the flag threshold, the request goes through with a warning put in front of its system prompt.
 
+**Elicitation requests from the server.** An `elicitation/create` request in form mode asks the client to show the person a form. MCP says servers must not use this to ask for sensitive information, so anvil refuses one whose fields ask for a password, token, API key, private key, one-time code, card number or similar, judged by each field's name and title. The server gets an error and the person never sees the form. URL mode elicitation, which exists for sensitive input, passes through.
+
 ## Policy reference
 
 ```toml
@@ -112,6 +114,9 @@ on_new_tool = "pin"         # "block" refuses tools that are not already in the 
 
 [approval]
 timeout_seconds = 60
+
+[elicitation]
+block_credentials = true    # refuse form elicitations that ask for a credential
 
 [[rule]]
 tool = "fetch_*"            # glob, case sensitive; the first matching rule wins
@@ -187,7 +192,7 @@ One JSON record per line. Each record carries the hash of the one before it:
 {"arguments": {"path": "app/.env"}, "event": "call.denied", "hash": "9b4e…", "prev": "41a7…", "reason": "argument 'path' matches a denied pattern", "rule": "read_*", "seq": 12, "tool": "read_text_file", "ts": 1795149667.21}
 ```
 
-Events: `gateway.started`, `call.allowed`, `call.denied`, `call.approved`, `call.rejected`, `call.malformed`, `tool.pinned`, `tool.changed`, `tool.unpinned`, `tool.poisoned`, `tool.flagged`, `tool.malformed`, `result.redacted`, `result.flagged`, `result.blocked`, `sampling.flagged`, `sampling.blocked`.
+Events: `gateway.started`, `call.allowed`, `call.denied`, `call.approved`, `call.rejected`, `call.malformed`, `tool.pinned`, `tool.changed`, `tool.unpinned`, `tool.poisoned`, `tool.flagged`, `tool.malformed`, `result.redacted`, `result.flagged`, `result.blocked`, `sampling.flagged`, `sampling.blocked`, `elicitation.blocked`.
 
 ```console
 $ anvil audit verify anvil-audit.jsonl
@@ -206,7 +211,7 @@ Read these before you rely on it.
 - **Redaction matches known shapes.** A secret with no recognizable format and no telling key name gets through.
 - **Approval needs a terminal.** A client that launches servers with no controlling terminal, as desktop apps do, cannot be asked. Approve rules deny in that case. `--approve deny` makes that explicit.
 - **The audit chain detects edits, it does not prevent them.** Someone who can rewrite the whole file can rebuild the chain. Ship the log elsewhere if that matters.
-- **Elicitation requests pass through.** Sampling requests from the server are scanned; elicitation requests, which go to the person rather than the model, are not inspected.
+- **Elicitation checks look at field names.** A form that asks for a credential under a plain name such as `value`, with the request in its message text, gets through. The message text is not scanned.
 - **JSON-RPC batches are split** and handled one message at a time. MCP dropped batching in its 2025-06-18 revision.
 
 ## Tests
@@ -216,7 +221,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-215 tests. The end-to-end tests start the real proxy in front of a deliberately hostile server (`tests/fake_server.py`) that poisons a tool description, leaks a credential and returns an injected page, then check what reaches the client and what lands in the audit log. CI runs the suite on Python 3.11, 3.12 and 3.13 on Linux, and on 3.13 on Windows.
+224 tests. The end-to-end tests start the real proxy in front of a deliberately hostile server (`tests/fake_server.py`) that poisons a tool description, leaks a credential and returns an injected page, then check what reaches the client and what lands in the audit log. CI runs the suite on Python 3.11, 3.12 and 3.13 on Linux, and on 3.13 on Windows.
 
 ## Layout
 
